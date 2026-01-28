@@ -9,8 +9,8 @@ U8X8_SSD1306_128X64_NONAME_HW_I2C oled(U8X8_PIN_NONE);
 #define POTENTIONMETER PIN_PC0
 
 uint16_t readADC() {
-  ADCSRA |= (1 << ADSC);             // Start conversion
-  while (ADCSRA & (1 << ADSC));      // Wait
+  ADCSRA |= (1 << ADSC);
+  while (ADCSRA & (1 << ADSC));
   return ADC;
 }
 
