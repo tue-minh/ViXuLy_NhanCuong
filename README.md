@@ -65,3 +65,17 @@ Trong Arduino IDE:
 → **Burn Bootloader**
 
 ---
+
+## User Manual
+- Triết áp: Trả về 9 giá trị từ 0 tới 8 tương đương với 8 tốc độ tăng dần của động cơ.
+- SW2: Bật động cơ
+- SW3: Tắt động cơ
+- SW4: Xoay thuận chiều (default)
+- SW5: Xoay ngược chiều
+
+| L298N | ATmega8L |
+|----------|----------|
+| PWM (ENA) | TIM1A (PB1) |
+| IN1 | PC2 |
+| IN2 | PC3 |
+| GND | GND |

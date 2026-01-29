@@ -2,77 +2,130 @@
 #include <U8x8lib.h>
 U8X8_SSD1306_128X64_NONAME_HW_I2C oled(U8X8_PIN_NONE);
 
-#define BTN1 PIN_PD4
-#define BTN2 PIN_PD5
-#define BTN3 PIN_PD6
-#define BTN4 PIN_PD7
+#define SW2 PIN_PD4
+#define SW3 PIN_PD5
+#define SW4 PIN_PD6
+#define SW5 PIN_PD7
+
 #define POTENTIONMETER PIN_PC0
-// #define ADC_SAMPLES 8
-#define ADC_THRESHOLD 100
 
-// uint16_t adcBuffer[ADC_SAMPLES];
-// uint8_t adcIndex = 0;
-// uint32_t adcSum = 0;
-uint16_t lastAdcValue = 0xFFFF;
-uint8_t lastBtnState = 0xFF;
+#define L298_ENA PIN_PB1 // OC1A - PWM - TIM1A
+#define L298_IN1 PIN_PC2
+#define L298_IN2 PIN_PC3
 
-// uint16_t readAdcFiltered() {
-//   uint16_t raw = analogRead(POTENTIONMETER);
+#define DEBOUNCE_TIME 40
 
-//   adcSum -= adcBuffer[adcIndex];
-//   adcBuffer[adcIndex] = raw;
-//   adcSum += raw;
+uint8_t lastAdcValue = 0;
+uint8_t lastBtnState = 0;
+uint32_t lastDebounceTime[4] = {0, 0, 0, 0};
 
-//   adcIndex++;
-//   if (adcIndex >= ADC_SAMPLES) adcIndex = 0;
+bool motorEnable = false;
+bool motorDirection = true; // true: forward, false: reverse
+uint8_t pwmValue = 0;
 
-//   return adcSum / ADC_SAMPLES;
-// }
+uint8_t prevMode = 0xFF;
+bool prevMotorEnable = 2;
+bool prevMotorDirection = 2;
+
+bool buttonPressed(uint8_t pin, uint8_t index)
+{
+  bool state = digitalRead(pin);
+
+  if (state && !(lastBtnState & (1 << index)))
+  {
+    if (millis() - lastDebounceTime[index] > DEBOUNCE_TIME)
+    {
+      lastDebounceTime[index] = millis();
+      lastBtnState |= (1 << index);
+      return true;
+    }
+  }
+
+  if (!state)
+    lastBtnState &= ~(1 << index);
+
+  return false;
+}
+
+void motorUpdate()
+{
+  if (!motorEnable)
+  {
+    digitalWrite(L298_IN1, LOW);
+    digitalWrite(L298_IN2, LOW);
+    analogWrite(L298_ENA, 0);
+    return;
+  }
+
+  if (motorDirection)
+  {
+    digitalWrite(L298_IN1, HIGH);
+    digitalWrite(L298_IN2, LOW);
+  }
+  else
+  {
+    digitalWrite(L298_IN1, LOW);
+    digitalWrite(L298_IN2, HIGH);
+  }
+
+  analogWrite(L298_ENA, pwmValue);
+}
+
+void oledUpdate(uint8_t mode)
+{
+  oled.clearDisplay();
+
+  char buf[5];
+  oled.drawString(0, 0, "MODE:");
+  itoa(mode, buf, 10);
+  oled.drawString(6, 0, buf);
+
+  oled.drawString(0, 3, motorEnable ? "RUN " : "STOP");
+  oled.drawString(0, 5, motorDirection ? "FWD" : "REV");
+}
 
 void setup()
 {
   oled.begin();
   oled.setPowerSave(0);
   oled.setFont(u8x8_font_8x13_1x2_r);
+
   pinMode(POTENTIONMETER, INPUT);
-  pinMode(BTN1, INPUT);
-  pinMode(BTN2, INPUT);
-  pinMode(BTN3, INPUT);
-  pinMode(BTN4, INPUT);
+  pinMode(SW2, INPUT);
+  pinMode(SW3, INPUT);
+  pinMode(SW4, INPUT);
+  pinMode(SW5, INPUT);
+
+  pinMode(L298_ENA, OUTPUT);
+  pinMode(L298_IN1, OUTPUT);
+  pinMode(L298_IN2, OUTPUT);
+
+  analogWrite(L298_ENA, 0);
 }
 
 void loop()
 {
   uint16_t adcValue = analogRead(POTENTIONMETER);
+  uint8_t Mode_Control = adcValue / 113;
+  if (Mode_Control > 8)
+    Mode_Control = 8;
 
-  uint8_t btnState = 0;
-  btnState |= digitalRead(BTN1) << 0;
-  btnState |= digitalRead(BTN2) << 1;
-  btnState |= digitalRead(BTN3) << 2;
-  btnState |= digitalRead(BTN4) << 3;
+  pwmValue = map(Mode_Control, 0, 8, 0, 255);
 
-  // if (adcValue != lastAdcValue || btnState != lastBtnState)
-  if (abs(adcValue - lastAdcValue) > ADC_THRESHOLD || btnState != lastBtnState) 
+  if (buttonPressed(SW2, 0))    motorEnable = true;
+  if (buttonPressed(SW3, 1))    motorEnable = false;
+  if (buttonPressed(SW4, 2))    motorDirection = true;
+  if (buttonPressed(SW5, 3))    motorDirection = false;
+
+  motorUpdate();
+  if (Mode_Control != prevMode ||
+      motorEnable != prevMotorEnable ||
+      motorDirection != prevMotorDirection)
   {
-    lastAdcValue = adcValue;
-    lastBtnState = btnState;
+    prevMode = Mode_Control;
+    prevMotorEnable = motorEnable;
+    prevMotorDirection = motorDirection;
 
-    char buf[8];
-    itoa(adcValue, buf, 10);
-
-    oled.clearDisplay();
-    oled.drawString(0, 0, "ADC0:");
-    oled.drawString(6, 0, buf);
-
-    uint8_t y = 4;
-
-    if (btnState & (1 << 0))
-      oled.drawString(0, y++, "PD4");
-    if (btnState & (1 << 1))
-      oled.drawString(0, y++, "PD5");
-    if (btnState & (1 << 2))
-      oled.drawString(0, y++, "PD6");
-    if (btnState & (1 << 3))
-      oled.drawString(0, y++, "PD7");
+    oledUpdate(Mode_Control);
   }
 }
