@@ -1,6 +1,5 @@
 #include <Arduino.h>
-#include <U8x8lib.h>
-U8X8_SSD1306_128X64_NONAME_HW_I2C oled(U8X8_PIN_NONE);
+#include "Tiny4kOLED.h"
 
 #define SW2_PIN 4            // PD4
 #define SW3_PIN 5            // PD5
@@ -25,15 +24,19 @@ uint32_t lastDebounceTime[4] = {0, 0, 0, 0};
 
 bool motorEnable = false;
 bool motorDirection = true; // true: forward, false: reverse
+bool forward = true;
+bool reverse = false;
 uint8_t pwmValue = 0;
 
-uint8_t prevMode = 0xff;
-bool prevMotorEnable = 2;
-bool prevMotorDirection = 2;
+uint8_t prevPWM = 255;
 
-bool buttonPressed(uint8_t pinMask, uint8_t index)
+uint8_t currentDisplayMode = 1;
+bool currentDisplayMotorEnable = true;
+bool currentDisplayMotorDirection = false;
+
+bool buttonPressed(uint8_t pin, uint8_t index)
 {
-  bool state = (PIND & pinMask) ? true : false;
+  bool state = digitalRead(pin);
 
   if (state && !(lastBtnState & (1 << index)))
   {
@@ -77,24 +80,76 @@ void motorUpdate()
   OCR1A = pwmValue;
 }
 
-void oledUpdate(uint8_t mode)
+void updateDisplay(uint8_t mode)
 {
-  oled.clearDisplay();
+  if (mode != currentDisplayMode)
+  {
+    currentDisplayMode = mode;
+    oled.setCursor(56, 0); // Cột 6, dòng 0
+    oled.print(" ");       // Xóa 2 ký tự
+    oled.setCursor(56, 0);
+    oled.print(mode);
+  }
 
-  char buf[5];
-  oled.drawString(0, 0, "MODE:");
-  itoa(mode, buf, 10);
-  oled.drawString(6, 0, buf);
+  if (motorEnable != currentDisplayMotorEnable)
+  {
+    currentDisplayMotorEnable = motorEnable;
+    oled.setCursor(56, 2);
+    if (motorEnable)
+    {
+      oled.print("RUN ");
+    }
+    else
+    {
+      oled.print("IDLE");
+    }
+  }
 
-  oled.drawString(0, 3, motorEnable ? "RUN " : "STOP");
-  oled.drawString(0, 5, motorDirection ? "FWD" : "REV");
+  if (motorDirection != currentDisplayMotorDirection)
+  {
+    currentDisplayMotorDirection = motorDirection;
+    oled.setCursor(56, 4);
+    if (motorDirection)
+    {
+      oled.print("FWD");
+    }
+    else
+    {
+      oled.print("REV");
+    }
+  }
+
+  if (motorEnable && pwmValue != prevPWM)
+  {
+    oled.setCursor(56, 6);
+    oled.print("   ");
+    oled.setCursor(56, 6);
+    oled.print(pwmValue);
+    oled.setCursor(80, 6);
+    oled.print("/255");
+  }
+  if (!motorEnable)
+  {
+    oled.setCursor(56, 6); // Cột 5, dòng 3
+    oled.print("       "); // Xóa 3 ký tự
+  }
 }
 
 void setup()
 {
-  oled.begin();
-  oled.setPowerSave(0);
-  oled.setFont(u8x8_font_8x13_1x2_r);
+  oled.begin(128, 64, sizeof(tiny4koled_init_128x64br), tiny4koled_init_128x64br);
+  oled.setFont(FONT8X16);
+  oled.on();
+  oled.clear();
+
+  oled.setCursor(0, 0);
+  oled.print(F("MODE: "));
+  oled.setCursor(0, 2);
+  oled.print(F("STATE: "));
+  oled.setCursor(0, 4);
+  oled.print(F("DIR: "));
+  oled.setCursor(0, 6);
+  oled.print(F("PWM: "));
 
   // ADC
   ADMUX = (1 << REFS0);
@@ -123,33 +178,48 @@ void loop()
   ADCSRA |= (1 << ADSC);
   while (ADCSRA & (1 << ADSC))
     ;
+
   uint16_t adcValue = ADC;
+  uint8_t Mode_Control = adcValue / 204;
+  if (Mode_Control > 4)
+    Mode_Control = 4;
 
-  uint8_t Mode_Control = adcValue / 113;
-  if (Mode_Control > 8)
-    Mode_Control = 8;
+  switch (Mode_Control)
+  {
+  case 0:
+    pwmValue = 0;
+    break;
+  case 1:
+    pwmValue = 51;
+    break;
+  case 2:
+    pwmValue = 102;
+    break;
+  case 3:
+    pwmValue = 153;
+    break;
+  case 4:
+    pwmValue = 204;
+    break;
+  }
 
-  pwmValue = map(Mode_Control, 0, 8, 0, 255);
-
-  if (buttonPressed((1 << SW2_PIN), 0))
+  if (buttonPressed(SW2_PIN, 0))
     motorEnable = true;
-  if (buttonPressed((1 << SW3_PIN), 1))
+  if (buttonPressed(SW3_PIN, 1))
     motorEnable = false;
-  if (buttonPressed((1 << SW4_PIN), 2))
-    motorDirection = true;
-  if (buttonPressed((1 << SW5_PIN), 3))
-    motorDirection = false;
+  if (buttonPressed(SW4_PIN, 2))
+  {
+    forward = true;
+    reverse = false;
+  }
+  if (buttonPressed(SW5_PIN, 3))
+  {
+    forward = false;
+    reverse = true;
+  }
+
+  motorDirection = forward && !reverse;
 
   motorUpdate();
-
-  if (Mode_Control != prevMode ||
-      motorEnable != prevMotorEnable ||
-      motorDirection != prevMotorDirection)
-  {
-    prevMode = Mode_Control;
-    prevMotorEnable = motorEnable;
-    prevMotorDirection = motorDirection;
-
-    oledUpdate(Mode_Control);
-  }
+  updateDisplay(Mode_Control);
 }
